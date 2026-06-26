@@ -1,0 +1,172 @@
+import cv2
+import time
+import math
+from PIL import Image, ImageDraw, ImageFont
+import numpy as np
+
+# =========================
+# CAMERA SETUP
+# =========================
+
+camera = cv2.VideoCapture(0)
+camera.set(cv2.CAP_PROP_FRAME_WIDTH, 960)
+camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 540)
+
+if not camera.isOpened():
+    print("Could not open webcam.")
+    exit()
+
+success, frame = camera.read()
+if not success:
+    print("Could not read webcam frame.")
+    camera.release()
+    exit()
+
+print("Select target tightly, then press ENTER or SPACE.")
+box = cv2.selectROI("Select Target", frame, fromCenter=False, showCrosshair=True)
+
+if box == (0, 0, 0, 0):
+    print("No target selected.")
+    camera.release()
+    exit()
+
+tracker = cv2.TrackerCSRT_create()
+tracker.init(frame, box)
+
+# =========================
+# SETTINGS
+# =========================
+
+HUD = (90, 255, 120)
+DIM = (0, 70, 25)
+RED = (0, 0, 255)
+
+start_time = time.time()
+frame_count = 0
+previous_center = None
+
+
+def get_font(size):
+    try:
+        return ImageFont.truetype("fonts/Orbitron-Regular.ttf", size)
+    except:
+        return ImageFont.truetype("C:/Windows/Fonts/consola.ttf", size)
+
+
+FONT_TITLE = get_font(18)
+FONT_MED = get_font(13)
+FONT_SMALL = get_font(10)
+
+
+def put_text(frame, text, xy, font, color=HUD):
+    image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(image)
+    draw.text(xy, text, font=font, fill=(color[2], color[1], color[0]))
+    return cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+
+
+def draw_target_brackets(img, x, y, w, h):
+    length = 24
+    thickness = 1
+
+    cv2.line(img, (x, y), (x + length, y), HUD, thickness)
+    cv2.line(img, (x, y), (x, y + length), HUD, thickness)
+
+    cv2.line(img, (x + w, y), (x + w - length, y), HUD, thickness)
+    cv2.line(img, (x + w, y), (x + w, y + length), HUD, thickness)
+
+    cv2.line(img, (x, y + h), (x + length, y + h), HUD, thickness)
+    cv2.line(img, (x, y + h), (x, y + h - length), HUD, thickness)
+
+    cv2.line(img, (x + w, y + h), (x + w - length, y + h), HUD, thickness)
+    cv2.line(img, (x + w, y + h), (x + w, y + h - length), HUD, thickness)
+
+
+def draw_center_crosshair(img):
+    h, w = img.shape[:2]
+    cx = w // 2
+    cy = h // 2
+
+    cv2.drawMarker(img, (cx, cy), HUD, cv2.MARKER_CROSS, 20, 1)
+
+    cv2.line(img, (cx, cy - 80), (cx, cy - 25), DIM, 1)
+    cv2.line(img, (cx, cy + 25), (cx, cy + 80), DIM, 1)
+    cv2.line(img, (cx - 80, cy), (cx - 25, cy), DIM, 1)
+    cv2.line(img, (cx + 25, cy), (cx + 80, cy), DIM, 1)
+
+
+def draw_scanline(img, elapsed):
+    h, w = img.shape[:2]
+    y = int((elapsed * 65) % h)
+    cv2.line(img, (0, y), (w, y), DIM, 1)
+
+
+def calculate_speed(current_center, previous_center, fps):
+    if current_center is None or previous_center is None:
+        return 0.0
+
+    dx = current_center[0] - previous_center[0]
+    dy = current_center[1] - previous_center[1]
+    distance = math.sqrt(dx ** 2 + dy ** 2)
+
+    return distance * fps
+
+
+while True:
+    success, frame = camera.read()
+    if not success:
+        print("Could not read frame.")
+        break
+
+    frame_count += 1
+    elapsed = time.time() - start_time
+    fps = frame_count / elapsed if elapsed > 0 else 0
+
+    tracking_success, box = tracker.update(frame)
+
+    overlay = frame.copy()
+    draw_center_crosshair(overlay)
+    draw_scanline(overlay, elapsed)
+
+    target_center = None
+    speed = 0.0
+
+    if tracking_success:
+        x, y, w, h = [int(v) for v in box]
+        target_center = (x + w // 2, y + h // 2)
+
+        speed = calculate_speed(target_center, previous_center, fps)
+        previous_center = target_center
+
+        draw_target_brackets(overlay, x, y, w, h)
+        status = "LOCK"
+        status_color = HUD
+    else:
+        previous_center = None
+        status = "LOST"
+        status_color = RED
+
+    frame = cv2.addWeighted(overlay, 0.50, frame, 0.50, 0)
+
+    # Minimal HUD
+    frame = put_text(frame, "TOMTOM ISR", (35, 30), FONT_TITLE)
+    frame = put_text(frame, f"TRACK {status}", (35, 62), FONT_MED, status_color)
+    frame = put_text(frame, "TGT 001", (35, 88), FONT_SMALL)
+    frame = put_text(frame, f"FPS {fps:.1f}", (35, 112), FONT_SMALL)
+
+    if tracking_success:
+        frame = put_text(frame, f"RATE {speed:.1f} PX/S", (35, 136), FONT_SMALL)
+
+    # REC indicator
+    if int(elapsed * 2) % 2 == 0:
+        cv2.circle(frame, (35, 510), 5, RED, -1)
+
+    frame = put_text(frame, "REC", (50, 498), FONT_SMALL, RED)
+
+    cv2.imshow("TOMTOM ISR TRACKER", frame)
+
+    if cv2.waitKey(1) & 0xFF == ord("q"):
+        break
+
+camera.release()
+cv2.destroyAllWindows()
