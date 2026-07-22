@@ -1,0 +1,17 @@
+[Unit]
+Description=TOMTOM MAVLink to OpenTAK CoT Bridge
+Wants=network-online.target
+After=network-online.target opentakserver.service
+
+[Service]
+Type=simple
+User=serena
+Group=serena
+WorkingDirectory=/home/serena/tomtom-bridge
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/serena/tomtom-venv/bin/python /home/serena/tomtom-bridge/mavlink_bridge.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
