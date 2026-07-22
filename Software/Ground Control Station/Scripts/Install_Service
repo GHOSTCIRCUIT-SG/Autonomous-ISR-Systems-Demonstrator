@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROJECT_DIR="/home/serena/tomtom-bridge"
+SERVICE_NAME="tomtom-mavlink-bridge.service"
+
+chmod 600 "${PROJECT_DIR}/bridge.ini"
+if [[ -f "${PROJECT_DIR}/data-packages/TOMTOM_BRIDGE/certs/TOMTOM_BRIDGE-key.pem" ]]; then
+    chmod 600 "${PROJECT_DIR}/data-packages/TOMTOM_BRIDGE/certs/TOMTOM_BRIDGE-key.pem"
+fi
+
+sudo cp "${PROJECT_DIR}/${SERVICE_NAME}" "/etc/systemd/system/${SERVICE_NAME}"
+sudo systemctl daemon-reload
+sudo systemctl enable --now "${SERVICE_NAME}"
+sudo systemctl status "${SERVICE_NAME}"
