@@ -1,0 +1,8 @@
+[default]
+COT_URL = tls://tak.tomtomtak.com:8089
+PYTAK_TLS_CLIENT_CERT = /home/serena/tomtom-bridge/data-packages/TOMTOM_BRIDGE/certs/TOMTOM_BRIDGE.pem
+PYTAK_TLS_CLIENT_KEY = /home/serena/tomtom-bridge/data-packages/TOMTOM_BRIDGE/certs/TOMTOM_BRIDGE-key.pem
+PYTAK_TLS_CLIENT_CAFILE = /home/serena/tomtom-bridge/data-packages/TOMTOM_BRIDGE/certs/TOMTOM_BRIDGE-ca.pem
+PYTAK_TLS_SERVER_EXPECTED_HOSTNAME = tak.tomtomtak.com
+PYTAK_TLS_DONT_CHECK_HOSTNAME = 1
+PYTAK_TLS_DONT_VERIFY = 1
