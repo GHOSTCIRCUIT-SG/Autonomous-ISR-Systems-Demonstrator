@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+import asyncio
+import math
+import xml.etree.ElementTree as ET
+from configparser import ConfigParser
+import pytak
+from pymavlink import mavutil
+
+MAVLINK_ENDPOINT = "udpin:0.0.0.0:14540"
+CALLSIGN = "TOMTOM UAV"
+UID = "TOMTOM-UAV-001"
+
+def create_cot_event(message) -> bytes:
+    latitude = message.lat / 10_000_000
+    longitude = message.lon / 10_000_000
+    altitude_m = message.relative_alt / 1_000
+    speed_mps = math.sqrt(message.vx**2 + message.vy**2) / 100
+    course = 0.0 if message.hdg == 65535 else message.hdg / 100
+    now = pytak.cot_time()
+    stale = pytak.cot_time(15)
+
+    event = ET.Element("event", {
+        "version": "2.0",
+        "uid": UID,
+        "type": "a-f-A",
+        "how": "m-g",
+        "time": now,
+        "start": now,
+        "stale": stale,
+    })
+    ET.SubElement(event, "point", {
+        "lat": f"{latitude:.7f}",
+        "lon": f"{longitude:.7f}",
+        "hae": f"{altitude_m:.1f}",
+        "ce": "5.0",
+        "le": "5.0",
+    })
+    detail = ET.SubElement(event, "detail")
+    ET.SubElement(detail, "contact", {"callsign": CALLSIGN})
+    ET.SubElement(detail, "track", {
+        "course": f"{course:.1f}",
+        "speed": f"{speed_mps:.2f}",
+    })
+    ET.SubElement(detail, "remarks").text = (
+        f"PX4 MAVLink telemetry | Altitude: {altitude_m:.1f} m"
+    )
+    return ET.tostring(event, encoding="utf-8")
+
+class MAVLinkSender(pytak.QueueWorker):
+    async def run(self) -> None:
+        self._logger.info("Opening MAVLink endpoint: %s", MAVLINK_ENDPOINT)
+        connection = mavutil.mavlink_connection(
+            MAVLINK_ENDPOINT,
+            autoreconnect=True,
+        )
+        self._logger.info("Waiting for PX4 heartbeat...")
+        heartbeat = await asyncio.to_thread(connection.wait_heartbeat, timeout=30)
+        if heartbeat is None:
+            raise TimeoutError("No PX4 heartbeat received within 30 seconds.")
+        self._logger.info(
+            "PX4 connected: system %s, component %s",
+            connection.target_system,
+            connection.target_component,
+        )
+        while True:
+            message = await asyncio.to_thread(
+                connection.recv_match,
+                type="GLOBAL_POSITION_INT",
+                blocking=True,
+                timeout=5,
+            )
+            if message is None:
+                self._logger.warning("Waiting for position telemetry...")
+                continue
+            await self.put_queue(create_cot_event(message))
+            self._logger.info(
+                "Sent %s: %.7f, %.7f, %.1f m",
+                CALLSIGN,
+                message.lat / 10_000_000,
+                message.lon / 10_000_000,
+                message.relative_alt / 1_000,
+            )
+
+async def main() -> None:
+    parser = ConfigParser()
+    if not parser.read("bridge.ini"):
+        raise FileNotFoundError("bridge.ini was not found.")
+    config = parser["default"]
+    tool = pytak.CLITool(config)
+    await tool.setup()
+    sender = MAVLinkSender(tool.tx_queue, config)
+    tool.add_tasks({sender})
+    await tool.run()
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nBridge stopped.")
+    except Exception as error:
+        print(f"\nBridge failed: {error}")
+        raise
