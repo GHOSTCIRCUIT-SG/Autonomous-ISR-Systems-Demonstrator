@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+import asyncio
+import xml.etree.ElementTree as ET
+from configparser import ConfigParser
+import pytak
+
+def create_cot_event() -> bytes:
+    now = pytak.cot_time()
+    stale = pytak.cot_time(120)
+    event = ET.Element("event", {
+        "version": "2.0",
+        "uid": "TOMTOM-BRIDGE-TEST-001",
+        "type": "a-f-A",
+        "how": "m-g",
+        "time": now,
+        "start": now,
+        "stale": stale,
+    })
+    ET.SubElement(event, "point", {
+        "lat": "26.3344",
+        "lon": "127.8056",
+        "hae": "10.0",
+        "ce": "10.0",
+        "le": "10.0",
+    })
+    detail = ET.SubElement(event, "detail")
+    ET.SubElement(detail, "contact", {"callsign": "TOMTOM TEST"})
+    ET.SubElement(detail, "remarks").text = "OpenTAKServer bridge connection test"
+    return ET.tostring(event, encoding="utf-8")
+
+class TestSender(pytak.QueueWorker):
+    async def run(self) -> None:
+        while True:
+            await self.put_queue(create_cot_event())
+            self._logger.info("Sending TOMTOM test marker")
+            await asyncio.sleep(10)
+
+async def main() -> None:
+    parser = ConfigParser()
+    if not parser.read("bridge.ini"):
+        raise FileNotFoundError("bridge.ini was not found.")
+    config = parser["default"]
+    tool = pytak.CLITool(config)
+    await tool.setup()
+    sender = TestSender(tool.tx_queue, config)
+    tool.add_tasks({sender})
+    await tool.run()
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nTest stopped.")
